@@ -80,7 +80,7 @@ export default async function AdminSubscriptionsPage() {
                 <td colSpan={5} className="text-center py-12 text-muted-foreground">Belum ada data langganan.</td>
               </tr>
             ) : (
-              subscriptions.map((sub) => (
+              subscriptions.map((sub: any) => (
                 <tr key={sub.id} className="border-b border-border hover:bg-muted transition">
                   <td className="p-4">
                     <div className="font-bold text-foreground">{sub.user.name || "Anonim"}</div>
