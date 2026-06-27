@@ -4,7 +4,16 @@ const ALGORITHM = "aes-256-cbc";
 
 // Generate a secure 32-byte key from AUTH_SECRET
 function getKey(): Buffer {
-  const secret = process.env.AUTH_SECRET || "fallback-secret-key-at-least-32-chars-long";
+  const secret = process.env.AUTH_SECRET;
+
+  if (!secret) {
+    throw new Error("AUTH_SECRET belum dikonfigurasi.");
+  }
+
+  if (secret.length < 32) {
+    throw new Error("AUTH_SECRET harus minimal 32 karakter.");
+  }
+
   return crypto.createHash("sha256").update(secret).digest();
 }
 

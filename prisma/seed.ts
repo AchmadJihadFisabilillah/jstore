@@ -114,8 +114,14 @@ async function main() {
   await prisma.user.deleteMany();
 
   // 1. Seed Admin
-  const adminEmail = process.env.ADMIN_EMAIL || "admin@jstore.id";
-  const adminPassword = process.env.ADMIN_PASSWORD || "AdminJStore123!";
+const adminEmail = process.env.ADMIN_EMAIL;
+const adminPassword = process.env.ADMIN_PASSWORD;
+
+if (!adminEmail || !adminPassword) {
+  throw new Error(
+    "ADMIN_EMAIL dan ADMIN_PASSWORD wajib diisi untuk menjalankan seed."
+  );
+}
   
   await prisma.user.create({
     data: {
