@@ -1,0 +1,662 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --------------------------------------------------
+// RBAC SYSTEM (Baru)
+// --------------------------------------------------
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique // e.g., USER, ADMIN, SUPER_ADMIN
+  description String?
+  isDefault   Boolean          @default(false)
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  action      String           @unique // e.g., "products.read", "orders.manage"
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// --------------------------------------------------
+// CORE
+// --------------------------------------------------
+
+enum OrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+  PAYMENT_REVIEW
+  PROCESSING
+  WAITING_STOCK
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  PROBLEM
+}
+
+model User {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  password String
+
+  // RBAC
+  role        String   @default("USER")
+  roleId      String?
+  roleRel     Role?    @relation(fields: [roleId], references: [id])
+  permissions String[] @default([]) // Kept for backward compatibility momentarily
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  orders        Order[]
+  tickets       Ticket[]
+  refunds       Refund[]
+  activityLogs  AdminActivityLog[]
+  voucherUsages VoucherUsage[]
+  notifications Notification[]
+
+  reservedStocks    DigitalStock[] @relation("ReservedByAdmin")
+  assignedStocks    DigitalStock[] @relation("AssignedToUser")
+  paymentsProcessed Payment[]      @relation("PaymentProcessedBy")
+
+  wishlists                    Wishlist[]
+  recentViews                  RecentlyViewed[]
+  loyaltyPoint                 LoyaltyPoint?
+  referral                     Referral?
+  sessions                     UserSession[]
+  reviews                      Review[]
+  subscriptions                Subscription[]
+  updatedManualPaymentSettings ManualPaymentSetting[] @relation("ManualPaymentSettingUpdatedBy")
+}
+
+model UserSession {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  device     String?
+  browser    String?
+  os         String?
+  ipAddress  String?
+  lastActive DateTime @default(now())
+  expiresAt  DateTime
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------------------
+// KATEGORI & PRODUK
+// --------------------------------------------------
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  icon        String?
+  color       String?
+  order       Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+}
+
+model Product {
+  id             String  @id @default(cuid())
+  name           String
+  description    String
+  category       String // kept for backward compatibility
+  categoryId     String?
+  logoUrl        String?
+  logoAlt        String?
+  logoSvgUrl     String?
+  bannerUrl      String?
+  dominantColor  String?
+  shortDesc      String?
+  usageGuide     String?
+  terms          String?
+  isActive       Boolean @default(true)
+  isRecommended  Boolean @default(false)
+  isBestseller   Boolean @default(false)
+  isNew          Boolean @default(false)
+  order          Int     @default(0)
+  seoTitle       String?
+  seoDescription String?
+
+  // Overhaul Fields
+  brandColor        String?
+  logoBackground    String?
+  logoPadding       String?
+  darkLogo          String?
+  lightLogo         String?
+  activationType    String? // e.g., "Otomatis", "Manual", "Butuh Data User", "Invite Email"
+  processingType    String? // e.g., "Proses Instan", "Proses Manual"
+  minProcessingTime Int? // in minutes
+  maxProcessingTime Int? // in minutes
+  operatingHours    String? // e.g., "08:00 - 22:00 WIB"
+  warrantyDuration  String? // e.g., "30 Hari"
+  warrantyTerms     String?
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @default(now()) @updatedAt
+  categoryRel Category?        @relation(fields: [categoryId], references: [id])
+  packages    Package[]
+  wishlists   Wishlist[]
+  recentViews RecentlyViewed[]
+}
+
+model Package {
+  id                String  @id @default(cuid())
+  productId         String
+  name              String
+  duration          Int
+  price             Int
+  costPrice         Int     @default(0)
+  originalPrice     Int     @default(0)
+  discount          Int     @default(0)
+  warranty          String?
+  description       String?
+  isActive          Boolean @default(true)
+  order             Int     @default(0)
+  sku               String? @unique
+  lowStockThreshold Int     @default(3)
+
+  isBundle Boolean @default(false)
+
+  // Overhaul Fields
+  processingType String? // Override from Product if necessary
+  stockStatus    String? // Denormalized cache: "Tersedia", "Stok Menipis", "Habis"
+
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  digitalStocks DigitalStock[]
+  bundleItems   BundleItem[]   @relation("BundleParent")
+  partOfBundles BundleItem[]   @relation("BundleChild")
+  reviews       Review[]
+  subscriptions Subscription[]
+}
+
+// --------------------------------------------------
+// BUNDLING
+// --------------------------------------------------
+
+model BundleItem {
+  id        String  @id @default(cuid())
+  bundleId  String
+  packageId String
+  quantity  Int     @default(1)
+  bundle    Package @relation("BundleParent", fields: [bundleId], references: [id], onDelete: Cascade)
+  package   Package @relation("BundleChild", fields: [packageId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------------------
+// INVENTORI & SUPPLIER
+// --------------------------------------------------
+
+model Supplier {
+  id       String         @id @default(cuid())
+  name     String
+  whatsapp String?
+  email    String?
+  isActive Boolean        @default(true)
+  joinedAt DateTime       @default(now())
+  notes    String?
+  stocks   DigitalStock[]
+}
+
+model DigitalStock {
+  id                   String    @id @default(cuid())
+  packageId            String
+  supplierId           String?
+  type                 String // EMAIL_PASSWORD, INVITE_EMAIL, LICENSE_KEY, ACTIVATION_LINK, MANUAL
+  email                String?
+  password             String? // Encrypted AES
+  pin                  String?
+  code                 String? // License key or redeem code
+  link                 String?
+  profile              String?
+  notes                String?
+  encryptedPayload     String? // JSON encrypted blob for complex stock data
+  fingerprintHash      String? // SHA-256 hash for duplicate detection
+  status               String    @default("AVAILABLE") // AVAILABLE, RESERVED, SOLD, FAULTY, REPLACED, EXPIRED, DISABLED
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  expiryDate           DateTime?
+  adminId              String? // Admin who added this stock
+  orderId              String? // Removed @unique to allow reassignment after release
+  reservedByAdminId    String?
+  reservedAt           DateTime?
+  reservationExpiresAt DateTime?
+  assignedToUserId     String?
+  assignedAt           DateTime?
+
+  package         Package         @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id])
+  order           Order?          @relation(fields: [orderId], references: [id])
+  reservedByAdmin User?           @relation("ReservedByAdmin", fields: [reservedByAdminId], references: [id])
+  assignedToUser  User?           @relation("AssignedToUser", fields: [assignedToUserId], references: [id])
+  stockMovements  StockMovement[]
+
+  @@index([packageId, status])
+  @@index([status])
+  @@index([orderId])
+  @@index([reservedByAdminId])
+  @@index([expiryDate])
+}
+
+model StockMovement {
+  id         String       @id @default(cuid())
+  stockId    String
+  action     String // RESERVE, RELEASE, ASSIGN, REPLACE, MARK_FAULTY, MARK_EXPIRED, RETURN_AVAILABLE, IMPORT, MANUAL_TAKE
+  fromStatus String
+  toStatus   String
+  orderId    String?
+  customerId String?
+  adminId    String
+  reason     String?
+  metadata   String? // JSON string, sanitized — no sensitive data
+  createdAt  DateTime     @default(now())
+  stock      DigitalStock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId])
+  @@index([adminId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// --------------------------------------------------
+// TRANSAKSI & PEMBAYARAN
+// --------------------------------------------------
+
+model Order {
+  id        String @id @default(cuid())
+  userId    String
+  packageId String
+
+  status          OrderStatus @default(PENDING)
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime    @default(now())
+  invoiceNo       String?     @unique
+  whatsapp        String?
+  costPrice       Int         @default(0)
+  adminNotes      String?
+  processedById   String?
+  paymentProof    String?
+  rejectionReason String?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package Package @relation(fields: [packageId], references: [id], onDelete: Restrict)
+
+  digitalStocks       DigitalStock[]
+  refund              Refund?
+  payment             Payment?
+  review              Review?
+  subscription        Subscription?
+  subscriptionRenewal SubscriptionRenewal?
+  voucherUsages       VoucherUsage[]
+  tickets             Ticket[]
+}
+
+model Payment {
+  id                    String    @id @default(cuid())
+  orderId               String    @unique
+  provider              String // MANUAL, MANDIRI
+  method                String // QRIS, VA, TRANSFER_SLIP
+  providerTransactionId String? // Transaksi ID dari penyedia
+  providerReference     String?
+  idempotencyKey        String?   @unique
+  amount                Int
+  currency              String    @default("IDR")
+  status                String    @default("PENDING") // PENDING, PAID, FAILED, EXPIRED, CANCELLED, REFUNDED
+  providerStatus        String?
+  qrPayload             String? // String data QRIS (raw payload)
+  qrImageUrl            String? // URL gambar QRIS
+  expiredAt             DateTime?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  cancelledAt           DateTime?
+
+  // Manual Payment Fields
+  proofUrl          String? // URL bukti pembayaran
+  proofOriginalName String?
+  proofMimeType     String?
+  proofSize         Int?
+  senderName        String?
+  senderAccount     String?
+  paymentTime       DateTime?
+  customerNote      String?
+  rejectionReason   String?
+  submittedAt       DateTime?
+  reviewedAt        DateTime?
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order         Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  attempts      PaymentAttempt[]
+  processedById String?
+  processedBy   User?            @relation("PaymentProcessedBy", fields: [processedById], references: [id])
+
+  @@unique([provider, providerTransactionId])
+}
+
+model PaymentAttempt {
+  id                    String    @id @default(cuid())
+  paymentId             String
+  attemptNumber         Int
+  requestReference      String? // ID referensi unik per request
+  providerTransactionId String?
+  status                String // PENDING, SUCCESS, FAILED
+  errorCode             String?
+  errorMessage          String?
+  startedAt             DateTime  @default(now())
+  completedAt           DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model PaymentWebhookEvent {
+  id                    String    @id @default(cuid())
+  provider              String
+  eventId               String?
+  providerTransactionId String?
+  signatureValid        Boolean
+  eventType             String?
+  processingStatus      String // PENDING, PROCESSED, FAILED
+  payloadHash           String // Hash payload untuk mencegah replikasi ganda
+  payload               String // JSON String (disensor)
+  errorMessage          String?
+  receivedAt            DateTime  @default(now())
+  processedAt           DateTime?
+
+  @@unique([provider, eventId])
+}
+
+// --------------------------------------------------
+// SUBSCRIPTION
+// --------------------------------------------------
+
+model Subscription {
+  id        String                @id @default(cuid())
+  userId    String
+  orderId   String?               @unique
+  packageId String
+  status    String                @default("ACTIVE") // ACTIVE, EXPIRING, EXPIRED, RENEWED
+  startDate DateTime
+  endDate   DateTime
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order     Order?                @relation(fields: [orderId], references: [id])
+  package   Package               @relation(fields: [packageId], references: [id])
+  renewals  SubscriptionRenewal[]
+}
+
+model SubscriptionRenewal {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  orderId        String       @unique
+  renewedAt      DateTime     @default(now())
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  order          Order        @relation(fields: [orderId], references: [id])
+}
+
+// --------------------------------------------------
+// VOUCHER & LOYALTY
+// --------------------------------------------------
+
+model Voucher {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  name          String
+  discountType  String // NOMINAL, PERCENTAGE
+  discountValue Int
+  maxDiscount   Int?
+  minPurchase   Int            @default(0)
+  quota         Int            @default(999)
+  usedCount     Int            @default(0)
+  maxPerUser    Int            @default(1)
+  startDate     DateTime
+  endDate       DateTime
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  usages        VoucherUsage[]
+}
+
+model VoucherUsage {
+  id        String   @id @default(cuid())
+  voucherId String
+  userId    String
+  orderId   String
+  createdAt DateTime @default(now())
+  voucher   Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model LoyaltyPoint {
+  id           String               @id @default(cuid())
+  userId       String               @unique
+  balance      Int                  @default(0)
+  level        String               @default("MEMBER") // MEMBER, SILVER, GOLD, PLATINUM
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+}
+
+model LoyaltyTransaction {
+  id             String       @id @default(cuid())
+  loyaltyPointId String
+  amount         Int
+  type           String // EARN, REDEEM
+  description    String?
+  createdAt      DateTime     @default(now())
+  loyaltyPoint   LoyaltyPoint @relation(fields: [loyaltyPointId], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  id           String                @id @default(cuid())
+  userId       String                @unique
+  code         String                @unique
+  balance      Int                   @default(0)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions ReferralTransaction[]
+}
+
+model ReferralTransaction {
+  id          String   @id @default(cuid())
+  referralId  String
+  amount      Int
+  type        String // EARN, WITHDRAW
+  description String?
+  createdAt   DateTime @default(now())
+  referral    Referral @relation(fields: [referralId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------------------
+// SOCIAL & ENGAGEMENT
+// --------------------------------------------------
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model RecentlyViewed {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  viewedAt  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  packageId String
+  orderId   String   @unique
+  rating    Int
+  comment   String?
+  reply     String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package   Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------------------
+// AFTER-SALES & SUPPORT
+// --------------------------------------------------
+
+model Ticket {
+  id          String          @id @default(cuid())
+  ticketNo    String          @unique
+  userId      String
+  orderId     String?
+  category    String
+  title       String
+  description String
+  priority    String // LOW, MEDIUM, HIGH, URGENT
+  status      String          @default("NEW") // NEW, IN_PROGRESS, WAITING_USER, RESOLVED, REJECTED
+  adminId     String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  closedAt    DateTime?
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    TicketMessage[]
+  order       Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderId   String
+  message    String
+  attachment String?
+  createdAt  DateTime @default(now())
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model Refund {
+  id          String   @id @default(cuid())
+  refundNo    String   @unique
+  orderId     String   @unique
+  userId      String
+  reason      String
+  amount      Int
+  status      String   @default("PENDING") // PENDING, UNDER_REVIEW, APPROVED, REJECTED, REFUNDED
+  attachment  String?
+  notes       String?
+  processedBy String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------------------
+// ADMIN & SYSTEM
+// --------------------------------------------------
+
+model AdminActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  module    String
+  details   String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdminNotification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String // NEW_ORDER, NEW_PAYMENT, LOW_STOCK, EXPIRED_SUBSCRIPTION, TICKET_NEW, REFUND_REQUEST
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String // ORDER_UPDATE, SUBSCRIPTION_ENDING, VOUCHER_NEW, TICKET_REPLY, GENERAL
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Backup {
+  id        String   @id @default(cuid())
+  fileName  String
+  sizeBytes Int
+  status    String   @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  createdAt DateTime @default(now())
+}
+
+model SalesTarget {
+  id           String   @id @default(cuid())
+  period       String // DAILY, WEEKLY, MONTHLY
+  startDate    DateTime
+  endDate      DateTime
+  targetValue  Int
+  currentValue Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model ManualPaymentSetting {
+  id             String   @id @default(cuid())
+  provider       String   @unique @default("MANUAL_QRIS")
+  merchantName   String   @default("Toko")
+  qrisImageUrl   String?
+  instructions   String?  @db.Text
+  expiryMinutes  Int      @default(1440)
+  isActive       Boolean  @default(true)
+  whatsappNumber String?
+  notes          String?  @db.Text
+  updatedById    String?
+  updatedBy      User?    @relation("ManualPaymentSettingUpdatedBy", fields: [updatedById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
