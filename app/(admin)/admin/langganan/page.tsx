@@ -16,9 +16,9 @@ export default async function AdminSubscriptionsPage() {
     orderBy: { endDate: "asc" }
   });
 
-  const activeCount = subscriptions.filter(s => s.status === "ACTIVE").length;
-  const expiringCount = subscriptions.filter(s => s.status === "EXPIRING").length;
-  const expiredCount = subscriptions.filter(s => s.status === "EXPIRED").length;
+  const activeCount = subscriptions.filter((s: any) => s.status === "ACTIVE").length;
+  const expiringCount = subscriptions.filter((s: any) => s.status === "EXPIRING").length;
+  const expiredCount = subscriptions.filter((s: any) => s.status === "EXPIRED").length;
 
   return (
     <div className="space-y-6">
